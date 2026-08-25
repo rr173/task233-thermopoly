@@ -84,11 +84,15 @@ func Detect(c *model.Curve, opt Options) (*Detected, error) {
 
 	// 重叠判定：相邻峰之间的谷值深度（两峰共享同一分离度，
 	// 首个峰若无相邻前驱则保持默认 1，否则保留与后峰的共享值）。
+	// 分谷深度低于阈值时，两个峰一并标为重叠——重叠是成对属性，
+	// 上下游（事件判读、状态机）据此把两条事件都置为需复核。
 	for i := 1; i < len(peaks); i++ {
 		sep := valleySeparation(pts, peaks[i-1], peaks[i], base)
 		peaks[i-1].Separation = sep
 		peaks[i].Separation = sep
 		if sep < opt.OverlapRatio {
+			peaks[i-1].Overlap = true
+			peaks[i].Overlap = true
 		}
 	}
 

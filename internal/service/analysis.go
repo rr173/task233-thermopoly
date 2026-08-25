@@ -184,8 +184,13 @@ func (s *Service) GenerateEvents(trialID string) ([]model.Event, error) {
 		ev.ID = newID("evt")
 		ev.TrialID = trialID
 		ev.Evidence = event.EvidenceJSON(cand.Evidence)
+		// 重叠峰对应事件标记为 overlapping（不确定性）：峰检测产出的
+		// Overlap 沿此链路传递——成对重叠的两条事件都置为需复核，
+		// 并把试验推进到 needs_review。漏标 hasOverlap 会让事件虽为
+		// overlapping 但试验停留在 pending_review，判读不确定性丢失。
 		if pk.Overlap && ev.Status == model.EventCandidate {
 			ev.Status = model.EventOverlapping
+			hasOverlap = true
 		}
 		now := time.Now()
 		ev.CreatedAt = now

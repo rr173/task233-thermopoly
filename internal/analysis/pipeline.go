@@ -26,6 +26,11 @@ type RunResult struct {
 	Segments []model.Segment `json:"segments"`
 	Peaks    []model.Peak    `json:"peaks"`
 	Events   []model.Event   `json:"events"`
+	// NeedsReview 指示本次判读存在不确定性（重叠峰），需人工复核。
+	// 由峰检测产出的 Overlap 标志沿事件判读链路传递：任一事件落入
+	// overlapping 即置位——若上游丢弃该标志，结果会退化为普通待判读，
+	// 试验无法进入 needs_review（见 GenerateEvents 的对偶实现）。
+	NeedsReview bool `json:"needs_review"`
 }
 
 // Run 对给定曲线集合执行完整流水线：
@@ -91,7 +96,15 @@ func (p *Pipeline) Run(dscCurves []model.Curve, tgaCurves []model.Curve, priors 
 		ev.ID = "evt-" + pk.ID
 		ev.TrialID = pk.TrialID
 		ev.Evidence = event.EvidenceJSON(cand.Evidence)
-		// 重叠峰事件标记为 overlapping（不确定性）
+		// 重叠峰事件标记为 overlapping（不确定性）：峰检测产出的
+		// Overlap 沿此链路传递——成对重叠的两条事件都置为需复核，
+		// 并把 RunResult.NeedsReview 置位，使试验进入 needs_review。
+		// 丢弃此步会让重叠退化为普通候选，掩盖判读不确定性。
+		if pk.Overlap && ev.Status == model.EventCandidate {
+			ev.Status = model.EventOverlapping
+			ev.Note = "overlapping peak uncertainty requires review"
+			res.NeedsReview = true
+		}
 		res.Events = append(res.Events, ev)
 	}
 	return res, nil
