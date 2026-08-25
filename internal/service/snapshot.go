@@ -138,7 +138,14 @@ func (s *Service) VerifySnapshotInput(id string) error {
 	if _, err := s.dep.Curves.AllHashes(sn.TrialID); err != nil {
 		return err
 	}
-	return snapshot.VerifyFrozen(sn, nil, 0)
+	// 重新读取当前输入指纹：重启后 sn 来自持久层，其 FrozenInputs
+	// 必须与当前曲线哈希集合一致。传入当前真实哈希，而非空集合，
+	// 否则未变更的输入也会被判为不一致（违反输入冻结语义）。
+	hashes, err := s.dep.Curves.AllHashes(sn.TrialID)
+	if err != nil {
+		return err
+	}
+	return snapshot.VerifyFrozen(sn, hashes, len(hashes))
 }
 
 var _ = time.Now

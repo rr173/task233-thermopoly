@@ -43,11 +43,16 @@ func (s *Service) NewDraft(in CreateInput, version int) model.Snapshot {
 
 // FreezeInput 生成输入指纹：将试验的曲线哈希集合序列化。
 // 发布时冻结，任何输入变化都会导致指纹不匹配。
+// curveCount 与 curveHashes 应一致；分别保留以兼容旧指纹结构，
+// 校验时以 curve_hashes 集合为准。
 func FreezeInput(curveHashes []string, curveCount int) string {
+	if curveHashes == nil {
+		curveHashes = []string{}
+	}
 	m := map[string]any{
-		"curve_count": curveCount,
-		"curve_hashes": []string{},
-		"frozen_at":   time.Now().UTC().Format(time.RFC3339),
+		"curve_count":  curveCount,
+		"curve_hashes": curveHashes,
+		"frozen_at":    time.Now().UTC().Format(time.RFC3339),
 	}
 	raw, _ := json.Marshal(m)
 	return string(raw)
@@ -86,27 +91,46 @@ func VerifyFrozen(sn *model.Snapshot, currentHashes []string, currentCount int) 
 		return nil // 草稿/已替代快照不校验
 	}
 	current := FreezeInput(currentHashes, currentCount)
-	// 比对指纹中的曲线哈希集合（忽略时间戳差异）
-	var cur, frozen map[string]any
-	if err := json.Unmarshal([]byte(current), &cur); err != nil {
+	// 解析当前输入指纹与冻结时记录的指纹（来自 sn.FrozenInputs，
+	// 重启后由持久层恢复），比较两者的曲线哈希集合（忽略时间戳差异）。
+	cur, err := parseFrozenJSON(current)
+	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(sn.FrozenInputs), &frozen); err != nil {
+	frozen, err := parseFrozenJSON(sn.FrozenInputs)
+	if err != nil {
 		return model.E(model.ErrInvalidInput, "frozen inputs corrupted for %s", sn.ID)
 	}
-	if len(cur["curve_hashes"].([]any)) != len(frozen["curve_hashes"].([]any)) {
+	frozenHashes, ok := frozen["curve_hashes"].([]any)
+	if !ok || len(frozenHashes) == 0 {
+		// 已发布快照必须冻结了曲线哈希；缺失说明指纹损坏（例如重启后
+		// 未正确恢复），不可当作"校验通过"，应明确判为无法验证。
+		return model.E(model.ErrInvalidInput, "frozen inputs corrupted for %s", sn.ID)
+	}
+	curHashes := cur["curve_hashes"].([]any)
+	if len(curHashes) != len(frozenHashes) {
 		return model.E(model.ErrConflict, "frozen snapshot %s input count mismatch", sn.ID)
 	}
 	curSet := map[string]bool{}
-	for _, h := range cur["curve_hashes"].([]any) {
+	for _, h := range curHashes {
 		curSet[h.(string)] = true
 	}
-	for _, h := range frozen["curve_hashes"].([]any) {
+	for _, h := range frozenHashes {
 		if !curSet[h.(string)] {
 			return model.E(model.ErrConflict, "frozen snapshot %s input hash mismatch", sn.ID)
 		}
 	}
 	return nil
+}
+
+// parseFrozenJSON 反序列化输入指纹 JSON。对缺失或类型不符的 curve_hashes
+// 返回空 map（由调用方安全降级判为损坏），而非 panic。
+func parseFrozenJSON(raw string) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (s *Service) rand() uint32 {

@@ -111,7 +111,8 @@ func scanSnapshot(row *sql.Row) (*model.Snapshot, error) {
 	if err := jsonUnmarshal(eventIDs, &sn.EventIDs); err != nil {
 		return nil, err
 	}
-	sn.FrozenInputs = "{}"
+	// 保留持久化的冻结输入指纹：发布时冻结的曲线哈希集合在重启后必须仍然存在，
+	// 否则校验会把未变更的快照当成损坏。切勿用占位 "{}" 覆盖。
 	sn.CreatedAt = parseTs(created)
 	sn.PublishedAt = parseTsPtr(published)
 	return &sn, nil
