@@ -87,6 +87,11 @@ func (s *Service) DetectPeaks(trialID string) ([]model.Peak, error) {
 	if len(dscCurves) == 0 {
 		return nil, model.E(model.ErrInvalidInput, "trial %s has no DSC curves", trialID)
 	}
+	if existing, err := s.dep.Peaks.ListByTrial(trialID); err != nil {
+		return nil, err
+	} else if len(existing) > 0 {
+		return existing, nil
+	}
 	var peaks []model.Peak
 	for _, c := range dscCurves {
 		det, err := peak.Detect(&c, s.peakOpt)
@@ -128,6 +133,11 @@ func (s *Service) GenerateEvents(trialID string) ([]model.Event, error) {
 	}
 	if t.Status == model.TrialSealed {
 		return nil, model.E(model.ErrSealedTrial, "sealed trial %s: events frozen", trialID)
+	}
+	if existing, err := s.dep.Events.ListByTrial(trialID); err != nil {
+		return nil, err
+	} else if len(existing) > 0 {
+		return existing, nil
 	}
 	priors, err := s.dep.Priors.ActiveList()
 	if err != nil {
