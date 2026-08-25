@@ -49,3 +49,14 @@ func TestVetoedEventKeepsTrialInReview(t *testing.T) {
 		t.Fatalf("status = %s, want needs_review", got.Status)
 	}
 }
+
+func TestSnapshotRequiresCompleteEventSet(t *testing.T) {
+	svc := newTestService(t)
+	tr, err := svc.CreateTrial(CreateTrialInput{Name: "snapshot", Material: "FormA", Unit: model.UnitCelsius})
+	if err != nil {
+		t.Fatalf("create trial: %v", err)
+	}
+	if _, err := svc.CreateSnapshot(CreateSnapshotInput{TrialID: tr.ID}); err == nil {
+		t.Fatal("empty snapshot must be rejected")
+	}
+}

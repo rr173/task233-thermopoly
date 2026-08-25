@@ -30,11 +30,20 @@ func (s *Service) CreateSnapshot(in CreateSnapshotInput) (*model.Snapshot, error
 	for _, e := range events {
 		valid[e.ID] = true
 	}
+	if len(events) == 0 {
+		return nil, model.E(model.ErrInvalidInput, "trial %s has no adjudicated events", in.TrialID)
+	}
+	seen := map[string]bool{}
 	for _, id := range in.EventIDs {
 		if !valid[id] {
 			return nil, model.E(model.ErrInvalidInput,
 				"event %s does not belong to trial %s", id, in.TrialID)
 		}
+		seen[id] = true
+	}
+	if len(seen) != len(events) {
+		return nil, model.E(model.ErrInvalidInput,
+			"snapshot for trial %s must include every event", in.TrialID)
 	}
 	version, err := s.dep.Snapshots.NextVersion(in.TrialID)
 	if err != nil {
