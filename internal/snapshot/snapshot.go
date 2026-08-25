@@ -68,14 +68,15 @@ func (s *Service) Publish(sn *model.Snapshot, frozenInputs string) error {
 	return nil
 }
 
-// Supersede 将旧发布快照标记为被新版本替代：published -> superseded。
+// Supersede 将旧发布快照标记为被新版本替代：published -> superseded，
+// 并记录取代它的快照 ID，使旧版本明确变为已替代、新版本成为当前发布版本。
 func (s *Service) Supersede(old *model.Snapshot, newID string) error {
 	if old.Status != model.SnapshotPublished {
 		return model.E(model.ErrStateTransition,
 			"only published snapshot can be superseded, got %q", old.Status)
 	}
-	old.Status = model.SnapshotPublished
-	old.ReplacedBy = ""
+	old.Status = model.SnapshotSuperseded
+	old.ReplacedBy = newID
 	return nil
 }
 

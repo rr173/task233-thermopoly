@@ -87,12 +87,14 @@ func (s *SnapshotStore) Update(sn *model.Snapshot) error {
 	return nil
 }
 
-// Published 取某试验当前已发布的最新快照（若无返回 ErrNotFound）。
+// Published 取某试验当前已发布的快照（最新发布版本，仅状态为 published；
+// 草稿/已替代版本不算当前发布结果。若无返回 ErrNotFound）。
 func (s *SnapshotStore) Published(trialID string) (*model.Snapshot, error) {
 	row := s.db.QueryRow(`
 		SELECT id, trial_id, version, status, summary, event_ids, frozen_inputs, published_at, replaced_by, created_at
-		FROM snapshots WHERE trial_id = ? ORDER BY version DESC LIMIT 1`,
-			trialID)
+		FROM snapshots WHERE trial_id = ? AND status = ?
+		ORDER BY version DESC LIMIT 1`,
+		trialID, model.SnapshotPublished)
 	return scanSnapshot(row)
 }
 

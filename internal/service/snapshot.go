@@ -90,16 +90,22 @@ func (s *Service) PublishSnapshot(id string) (*model.Snapshot, error) {
 		return nil, err
 	}
 	frozen := snapshot.FreezeInput(hashes, len(hashes))
-	// 替代旧发布版本
-	if old, err := s.dep.Snapshots.Published(sn.TrialID); err == nil {
-		if old.ID != sn.ID {
-		}
-	}
+	// 替代旧发布版本：先取得当前发布版本（在发布新版本之前，确保
+	// 不会被新版本自身顶替查询结果），再把旧版本标记为 superseded，
+	// 使新版本成为当前发布版本、旧版本明确变为已替代。
+	old, oldErr := s.dep.Snapshots.Published(sn.TrialID)
 	if err := s.snapSvc.Publish(sn, frozen); err != nil {
 		return nil, err
 	}
 	if err := s.dep.Snapshots.Update(sn); err != nil {
 		return nil, err
+	}
+	if oldErr == nil && old.ID != sn.ID {
+		if err := s.snapSvc.Supersede(old, sn.ID); err == nil {
+			if uerr := s.dep.Snapshots.Update(old); uerr != nil {
+				return nil, uerr
+			}
+		}
 	}
 	// 发布后试验推进到 confirmed（若仍为 pending/needs_review）
 	if model.CanTransition(t.Status, model.TrialConfirmed) && t.Status != model.TrialConfirmed {
