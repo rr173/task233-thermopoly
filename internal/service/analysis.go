@@ -309,6 +309,9 @@ func (s *Service) refreshTrialStatus(trialID string) error {
 			hasOverlap = true
 		case model.EventCandidate, model.EventUnknown:
 			hasPending = true
+		case model.EventVetoed:
+			// 否决也是需要复核的结论，不能把试验直接推进为 confirmed。
+			hasPending = true
 		}
 	}
 	target := model.TrialPending
