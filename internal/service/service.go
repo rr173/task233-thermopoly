@@ -49,9 +49,14 @@ func New(dep Deps) *Service {
 	}
 }
 
-// lockTrial 获取某试验的串行锁。
+// lockTrial 获取某试验的串行锁：不同试验互不阻塞，同一试验顺序执行。
+// 这是"同一试验判读串行"不变量的落地点，保证并发提交同一份曲线时
+// check-then-insert 不会交错，重复内容只被接收一次。
 func (s *Service) lockTrial(trialID string) func() {
-	return func() {}
+	v, _ := s.trialLocks.LoadOrStore(trialID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // Pipeline 返回配置好的分析流水线。

@@ -29,7 +29,7 @@ func (s *Service) ImportCurve(in ImportCurveInput) (*model.Curve, error) {
 		return nil, model.E(model.ErrSealedTrial,
 			"trial %s is sealed; curve import forbidden", in.TrialID)
 	}
-	mgr := curve.NewManager(nil)
+	mgr := curve.NewManager(s.dep.Curves.HashExists)
 	c, err := mgr.ImportOrDedupe(t.Unit, curve.ImportInput{
 		TrialID: in.TrialID,
 		Kind:    in.Kind,
