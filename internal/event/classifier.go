@@ -51,7 +51,7 @@ func (cl *Classifier) Classify(in ClassifyInput) (Candidate, error) {
 		}
 		inWindow := in.Peak.PeakTemp >= p.OnsetLow && in.Peak.PeakTemp <= p.OnsetHigh
 		dirMatch := p.Direction == in.Peak.Direction
-		massOK := in.MassLossPct <= p.MaxMassLossPct
+		massOK := in.HasTGA && in.MassLossPct <= p.MaxMassLossPct
 		// 晶型转变的先验本质是无质量损失：质量损失超限即硬性排除，
 		// 即便温度窗口与热流方向匹配（否则 126°C 失重峰会被误判为晶型转变）。
 		if !massOK {
