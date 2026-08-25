@@ -175,6 +175,71 @@ func TestEndToEndAnalysis(t *testing.T) {
 	}
 }
 
+// TestSealedTrialRejectsAllInputModifications 验证封存终态：封存后
+// 新曲线（内容不同、绕过哈希幂等）、新升温程序版本与重跑基线均被拒绝，
+// 返回 ErrSealedTrial。此前这三条路径缺少封存检查，重复曲线仅靠哈希
+// 幂等挡住、未触发封存语义，因此能掩盖该缺陷。
+func TestSealedTrialRejectsAllInputModifications(t *testing.T) {
+	svc := newTestService(t)
+	tr, _ := svc.CreateTrial(CreateTrialInput{Name: "sealed", Material: "FormA", Unit: model.UnitCelsius})
+	tid := tr.ID
+	if _, err := svc.ImportCurve(ImportCurveInput{TrialID: tid, Kind: model.CurveDSC, Unit: model.UnitCelsius, Points: synthSmokeDSC()}); err != nil {
+		t.Fatalf("dsc: %v", err)
+	}
+	if _, err := svc.ImportCurve(ImportCurveInput{TrialID: tid, Kind: model.CurveTGA, Unit: model.UnitCelsius, Points: synthSmokeTGA()}); err != nil {
+		t.Fatalf("tga: %v", err)
+	}
+	if _, err := svc.SetProgram(SetProgramInput{TrialID: tid, Name: "p", StartTemp: 30, EndTemp: 200, RateKPerMin: 10}); err != nil {
+		t.Fatalf("program: %v", err)
+	}
+	if _, err := svc.RunBaseline(tid); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if _, err := svc.DetectPeaks(tid); err != nil {
+		t.Fatalf("peaks: %v", err)
+	}
+	events, err := svc.GenerateEvents(tid)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	if _, err := svc.SplitOverlapping(events[0].ID, events[1].ID, "TGA evidence", "A->B", "solvent"); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	for _, e := range events {
+		if _, err := svc.AdjudicateEvent(e.ID, model.EventConfirmed, "ok"); err != nil {
+			t.Fatalf("adjudicate: %v", err)
+		}
+	}
+	if _, err := svc.SealTrial(tid); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// 新 DSC 曲线（内容不同于已导入者，绕过哈希幂等判重）。
+	differentDSC := []model.Point{}
+	for _, p := range synthSmokeDSC() {
+		differentDSC = append(differentDSC, model.Point{Temp: p.Temp, Value: p.Value + 0.001})
+	}
+	if _, err := svc.ImportCurve(ImportCurveInput{TrialID: tid, Kind: model.CurveDSC, Unit: model.UnitCelsius, Points: differentDSC}); err == nil {
+		t.Fatal("sealed trial must reject import of a new curve")
+	} else if !model.IsKind(err, model.ErrSealedTrial) {
+		t.Fatalf("import error kind = %v, want ErrSealedTrial", err)
+	}
+
+	// 新升温程序版本。
+	if _, err := svc.SetProgram(SetProgramInput{TrialID: tid, Name: "p2", StartTemp: 30, EndTemp: 210, RateKPerMin: 12}); err == nil {
+		t.Fatal("sealed trial must reject new program version")
+	} else if !model.IsKind(err, model.ErrSealedTrial) {
+		t.Fatalf("program error kind = %v, want ErrSealedTrial", err)
+	}
+
+	// 重跑基线校正。
+	if _, err := svc.RunBaseline(tid); err == nil {
+		t.Fatal("sealed trial must reject baseline reprocessing")
+	} else if !model.IsKind(err, model.ErrSealedTrial) {
+		t.Fatalf("baseline error kind = %v, want ErrSealedTrial", err)
+	}
+}
+
 // synthSmokeDSC 合成与 smoke-test 相同的双重叠峰 DSC 曲线。
 func synthSmokeDSC() []model.Point {
 	var pts []model.Point

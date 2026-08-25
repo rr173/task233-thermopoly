@@ -25,6 +25,10 @@ func (s *Service) ImportCurve(in ImportCurveInput) (*model.Curve, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 封存终态：曲线是输入，封存后禁止导入新曲线。
+	if t.Status == model.TrialSealed {
+		return nil, model.E(model.ErrSealedTrial, "sealed trial %s: curves frozen", in.TrialID)
+	}
 	mgr := curve.NewManager(s.dep.Curves.HashExists)
 	c, err := mgr.ImportOrDedupe(t.Unit, curve.ImportInput{
 		TrialID: in.TrialID,
@@ -78,9 +82,13 @@ type SetProgramInput struct {
 func (s *Service) SetProgram(in SetProgramInput) (*model.Program, error) {
 	unlock := s.lockTrial(in.TrialID)
 	defer unlock()
-	_, err := s.dep.Trials.Get(in.TrialID)
+	t, err := s.dep.Trials.Get(in.TrialID)
 	if err != nil {
 		return nil, err
+	}
+	// 封存终态：升温程序是输入，封存后禁止新建版本。
+	if t.Status == model.TrialSealed {
+		return nil, model.E(model.ErrSealedTrial, "sealed trial %s: program frozen", in.TrialID)
 	}
 	if in.RateKPerMin <= 0 || in.EndTemp <= in.StartTemp {
 		return nil, model.E(model.ErrInvalidInput,

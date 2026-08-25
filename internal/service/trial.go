@@ -103,7 +103,9 @@ func (s *Service) SealTrial(id string) (*model.Trial, error) {
 		return nil, model.E(model.ErrStateTransition,
 			"trial %s must be confirmed before sealing (current %s)", id, t.Status)
 	}
-	if err := s.dep.Trials.UpdateStatus(id, model.TrialConfirmed, t.CurveHash); err != nil {
+	// 写入封存终态（status=sealed + sealed_at）。此前误用 UpdateStatus 设为
+	// confirmed（即当前状态），导致试验从未真正封存、封存后仍可被修改。
+	if err := s.dep.Trials.Seal(id); err != nil {
 		return nil, err
 	}
 	return s.dep.Trials.Get(id)

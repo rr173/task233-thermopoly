@@ -22,9 +22,13 @@ type BaselineResult struct {
 func (s *Service) RunBaseline(trialID string) (*BaselineResult, error) {
 	unlock := s.lockTrial(trialID)
 	defer unlock()
-	_, err := s.dep.Trials.Get(trialID)
+	t, err := s.dep.Trials.Get(trialID)
 	if err != nil {
 		return nil, err
+	}
+	// 封存终态：基线校正是输入处理，封存后禁止重跑。
+	if t.Status == model.TrialSealed {
+		return nil, model.E(model.ErrSealedTrial, "sealed trial %s: baseline frozen", trialID)
 	}
 	curves, err := s.dep.Curves.ListByTrial(trialID)
 	if err != nil {
