@@ -135,7 +135,6 @@ func (s *Service) VerifySnapshotInput(id string) error {
 		return model.E(model.ErrStateTransition,
 			"snapshot %s is not published; only published snapshots verify inputs", id)
 	}
-	return nil
 	hashes, err := s.dep.Curves.AllHashes(sn.TrialID)
 	if err != nil {
 		return err

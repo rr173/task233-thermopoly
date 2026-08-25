@@ -205,3 +205,87 @@ func synthSmokeTGA() []model.Point {
 func exp(v float64) float64 {
 	return math.Exp(v)
 }
+
+// synthDSCAt 在 tempPeak 处生成单高斯吸热峰 DSC 曲线，
+// 内容哈希与 synthSmokeDSC 不同，用于快照输入变更回归。
+func synthDSCAt(tempPeak float64) []model.Point {
+	var pts []model.Point
+	for temp := 30.0; temp <= 200.0; temp += 1.0 {
+		d := (temp - tempPeak) / 3.0
+		pts = append(pts, model.Point{Temp: temp, Value: exp(-d * d)})
+	}
+	return pts
+}
+
+// TestVerifySnapshotInputDetectsNewCurveAfterPublish 回归：
+// 快照发布后试验又导入了新的曲线，校验快照输入时必须报告输入已变化，
+// 不能继续把结论视为有效。此前因 AllHashes 的 LIMIT 1 与
+// VerifyFrozen 的提前 return nil 导致新增曲线被忽略。
+func TestVerifySnapshotInputDetectsNewCurveAfterPublish(t *testing.T) {
+	svc := newTestService(t)
+	tr, _ := svc.CreateTrial(CreateTrialInput{Name: "t", Material: "m", Unit: model.UnitCelsius})
+	tid := tr.ID
+	if _, err := svc.ImportCurve(ImportCurveInput{TrialID: tid, Kind: model.CurveDSC, Unit: model.UnitCelsius, Points: synthSmokeDSC()}); err != nil {
+		t.Fatalf("dsc: %v", err)
+	}
+	if _, err := svc.ImportCurve(ImportCurveInput{TrialID: tid, Kind: model.CurveTGA, Unit: model.UnitCelsius, Points: synthSmokeTGA()}); err != nil {
+		t.Fatalf("tga: %v", err)
+	}
+	if _, err := svc.CreatePrior(CreatePriorInput{
+		FormFrom: "FormA", FormTo: "FormB", OnsetLow: 110, OnsetHigh: 130,
+		Direction: model.DirectionEndothermic, MaxMassLossPct: 0.5,
+	}); err != nil {
+		t.Fatalf("prior: %v", err)
+	}
+	if _, err := svc.RunBaseline(tid); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if _, err := svc.DetectPeaks(tid); err != nil {
+		t.Fatalf("detect peaks: %v", err)
+	}
+	events, err := svc.GenerateEvents(tid)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	split, err := svc.SplitOverlapping(events[0].ID, events[1].ID,
+		"TGA derivative 2.5% loss at 126C; DSC shoulder at 120C", "FormA->FormB", "solvent")
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	for _, e := range split {
+		if _, err := svc.AdjudicateEvent(e.ID, model.EventConfirmed, "ok"); err != nil {
+			t.Fatalf("adjudicate: %v", err)
+		}
+	}
+	sn, err := svc.CreateSnapshot(CreateSnapshotInput{
+		TrialID: tid, Summary: "s", EventIDs: []string{split[0].ID, split[1].ID},
+	})
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if _, err := svc.PublishSnapshot(sn.ID); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// 发布后发布前输入未变化：校验通过。
+	if err := svc.VerifySnapshotInput(sn.ID); err != nil {
+		t.Fatalf("verify before change: %v", err)
+	}
+
+	// 发布后又导入一条新 DSC 曲线（内容哈希不同）。试验尚未封存，允许导入。
+	if _, err := svc.ImportCurve(ImportCurveInput{
+		TrialID: tid, Kind: model.CurveDSC, Name: "extra run", Unit: model.UnitCelsius,
+		Points: synthDSCAt(160),
+	}); err != nil {
+		t.Fatalf("import new curve after publish: %v", err)
+	}
+
+	// 关键断言：输入已变化，校验必须报告冲突，不得把结论视为有效。
+	err = svc.VerifySnapshotInput(sn.ID)
+	if err == nil {
+		t.Fatal("verify must report changed input when a new curve is imported after publish")
+	}
+	if !model.IsKind(err, model.ErrConflict) {
+		t.Errorf("error kind = %v, want ErrConflict", err)
+	}
+}

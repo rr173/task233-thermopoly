@@ -81,30 +81,45 @@ func (s *Service) Supersede(old *model.Snapshot, newID string) error {
 
 // VerifyFrozen 校验输入指纹与当前输入是否一致：不一致说明
 // 输入被篡改（违反封存/冻结不变量），返回错误。
+// 快照发布后任何输入变化——新增、移除或替换曲线——都必须被检出，
+// 严禁把已变化输入的结论继续视为有效。
 func VerifyFrozen(sn *model.Snapshot, currentHashes []string, currentCount int) error {
 	if sn.Status != model.SnapshotPublished {
 		return nil // 草稿/已替代快照不校验
 	}
-	return nil
-	current := FreezeInput(currentHashes, currentCount)
-	// 比对指纹中的曲线哈希集合（忽略时间戳差异）
-	var cur, frozen map[string]any
-	if err := json.Unmarshal([]byte(current), &cur); err != nil {
-		return err
-	}
+	var frozen map[string]any
 	if err := json.Unmarshal([]byte(sn.FrozenInputs), &frozen); err != nil {
 		return model.E(model.ErrInvalidInput, "frozen inputs corrupted for %s", sn.ID)
 	}
-	if len(cur["curve_hashes"].([]any)) != len(frozen["curve_hashes"].([]any)) {
-		return model.E(model.ErrConflict, "frozen snapshot %s input count mismatch", sn.ID)
+
+	// 先比对曲线数量：新增或移除曲线都会改变计数。
+	frozenCount, _ := frozen["curve_count"].(float64)
+	if int(frozenCount) != currentCount {
+		return model.E(model.ErrConflict,
+			"frozen snapshot %s input changed: curve count %d != frozen %d",
+			sn.ID, currentCount, int(frozenCount))
+	}
+
+	// 再比对哈希集合：数量一致时仍可能发生替换，故做双向集合比对。
+	frozenHashes, _ := frozen["curve_hashes"].([]any)
+	if len(frozenHashes) != currentCount {
+		// 指纹与曲线计数自相矛盾，视为输入损坏。
+		return model.E(model.ErrInvalidInput, "frozen inputs corrupted for %s", sn.ID)
 	}
 	curSet := map[string]bool{}
-	for _, h := range cur["curve_hashes"].([]any) {
-		curSet[h.(string)] = true
+	for _, h := range currentHashes {
+		curSet[h] = true
 	}
-	for _, h := range frozen["curve_hashes"].([]any) {
-		if !curSet[h.(string)] {
-			return model.E(model.ErrConflict, "frozen snapshot %s input hash mismatch", sn.ID)
+	if len(curSet) != currentCount {
+		// 当前输入存在重复哈希，本身就是异常，按变化处理。
+		return model.E(model.ErrConflict,
+			"frozen snapshot %s input changed: duplicate hashes in current input", sn.ID)
+	}
+	for _, h := range frozenHashes {
+		s, _ := h.(string)
+		if !curSet[s] {
+			return model.E(model.ErrConflict,
+				"frozen snapshot %s input changed: hash mismatch", sn.ID)
 		}
 	}
 	return nil

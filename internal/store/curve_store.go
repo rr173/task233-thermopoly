@@ -111,8 +111,10 @@ func (s *CurveStore) UpdateStatus(id, status string) error {
 }
 
 // AllHashes 返回某试验全部曲线的哈希列表（供快照冻结输入）。
+// 必须返回全部曲线哈希：快照冻结/校验基于完整哈希集合，
+// 漏掉任何一条（如发布后新增的曲线）都会让输入变更检测失效。
 func (s *CurveStore) AllHashes(trialID string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT hash FROM curves WHERE trial_id = ? ORDER BY kind, imported_at LIMIT 1`, trialID)
+	rows, err := s.db.Query(`SELECT hash FROM curves WHERE trial_id = ? ORDER BY kind, imported_at`, trialID)
 	if err != nil {
 		return nil, err
 	}
