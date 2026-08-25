@@ -94,7 +94,10 @@ func (s *Service) SetProgram(in SetProgramInput) (*model.Program, error) {
 			"invalid program: rate %v must be positive and end %v > start %v",
 			in.RateKPerMin, in.EndTemp, in.StartTemp)
 	}
-	version := 1
+	version, err := s.dep.Programs.NextVersion(in.TrialID)
+	if err != nil {
+		return nil, err
+	}
 	p := &model.Program{
 		ID:          newID("prg"),
 		TrialID:     in.TrialID,

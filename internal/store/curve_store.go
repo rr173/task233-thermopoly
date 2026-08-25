@@ -135,13 +135,18 @@ type ProgramStore struct{ db *sql.DB }
 // NewProgramStore 创建升温程序仓库。
 func NewProgramStore(db *sql.DB) *ProgramStore { return &ProgramStore{db: db} }
 
-// Upsert 写入（或覆盖激活）升温程序：旧版本置为不激活。
+// Upsert 写入新版本升温程序并在同一事务内停用旧激活版本：
+// 新版本号由调用方据 NextVersion 递增；此处保证试验任一时刻仅一条 is_active=1。
 func (s *ProgramStore) Upsert(p *model.Program) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// 先停用该试验此前激活的版本，保证唯一激活版本
+	if _, err := tx.Exec(`UPDATE programs SET is_active = 0 WHERE trial_id = ? AND is_active = 1`, p.TrialID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`
 		INSERT INTO programs (id, trial_id, name, start_temp, end_temp, rate_k_per_min, version, is_active, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -151,11 +156,11 @@ func (s *ProgramStore) Upsert(p *model.Program) error {
 	return tx.Commit()
 }
 
-// GetActive 取试验当前激活的程序。
+// GetActive 取试验当前激活的程序（版本倒序，保证返回最新激活版本）。
 func (s *ProgramStore) GetActive(trialID string) (*model.Program, error) {
 	row := s.db.QueryRow(`
 		SELECT id, trial_id, name, start_temp, end_temp, rate_k_per_min, version, is_active, created_at
-		FROM programs WHERE trial_id = ? AND is_active = 1 ORDER BY version ASC LIMIT 1`, trialID)
+		FROM programs WHERE trial_id = ? AND is_active = 1 ORDER BY version DESC LIMIT 1`, trialID)
 	var p model.Program
 	var created string
 	err := row.Scan(&p.ID, &p.TrialID, &p.Name, &p.StartTemp, &p.EndTemp,
@@ -164,6 +169,35 @@ func (s *ProgramStore) GetActive(trialID string) (*model.Program, error) {
 		return nil, wrapNotFound(err)
 	}
 	// Scan 已把 INTEGER 转 bool，勿再 intToBool 覆盖
+	p.CreatedAt = parseTs(created)
+	return &p, nil
+}
+
+// NextVersion 返回某试验的下一个升温程序版本号（MAX(version)+1，无记录则为 1）。
+func (s *ProgramStore) NextVersion(trialID string) (int, error) {
+	var n sql.NullInt64
+	err := s.db.QueryRow(`SELECT MAX(version) FROM programs WHERE trial_id = ?`, trialID).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	if !n.Valid {
+		return 1, nil
+	}
+	return int(n.Int64) + 1, nil
+}
+
+// Get 按 ID 取单条升温程序（含历史/停用版本）。
+func (s *ProgramStore) Get(id string) (*model.Program, error) {
+	row := s.db.QueryRow(`
+		SELECT id, trial_id, name, start_temp, end_temp, rate_k_per_min, version, is_active, created_at
+		FROM programs WHERE id = ?`, id)
+	var p model.Program
+	var created string
+	err := row.Scan(&p.ID, &p.TrialID, &p.Name, &p.StartTemp, &p.EndTemp,
+		&p.RateKPerMin, &p.Version, &p.IsActive, &created)
+	if err != nil {
+		return nil, wrapNotFound(err)
+	}
 	p.CreatedAt = parseTs(created)
 	return &p, nil
 }
