@@ -160,9 +160,9 @@ func (s *Service) GenerateEvents(trialID string) ([]model.Event, error) {
 		tga = &tgaCurves[0]
 	}
 	refTemp := 0.0
-	if len(peaks) > 0 {
-		// 参考温度取首峰起点（近似曲线起点）
-		refTemp = peaks[0].StartTemp
+	if tga != nil && len(tga.Points) > 0 {
+		// 质量损失必须相对 TGA 自身的起始质量计算，不能借用 DSC 峰区间起点。
+		refTemp = tga.Points[0].Temp
 	}
 	hasOverlap := false
 	var events []model.Event

@@ -69,10 +69,9 @@ func (p *Pipeline) Run(dscCurves []model.Curve, tgaCurves []model.Curve, priors 
 	// 3. 事件判读
 	cl := event.NewClassifier(priors)
 	firstTGA := firstCurve(tga)
-	firstDSC := firstCurve(dscCurves)
 	refTemp := 0.0
-	if len(firstDSC.Points) > 0 {
-		refTemp = firstDSC.Points[0].Temp
+	if firstTGA != nil && len(firstTGA.Points) > 0 {
+		refTemp = firstTGA.Points[0].Temp
 	}
 	for _, pk := range allPeaks {
 		massLoss := 0.0
